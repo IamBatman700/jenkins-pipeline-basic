@@ -4,6 +4,7 @@ pipeline {
     environment {
         IMAGE_NAME = 'flask-hostname-app'
         IMAGE_TAG = "${BUILD_NUMBER}"
+        SLIM_IMAGE_TAG = "${BUILD_NUMBER}-slim"
         DOCKERHUB_REPO = 'mathieu700/flask-hostname-app'
         YOUR_NAME = 'Matt'
         MAX_IMAGE_SIZE_MB = '250'
@@ -64,6 +65,7 @@ pipeline {
 
                     echo "IMAGE_NAME=${IMAGE_NAME}" > metadata/build-metadata.txt
                     echo "IMAGE_TAG=${IMAGE_TAG}" >> metadata/build-metadata.txt
+                    echo "SLIM_IMAGE_TAG=${SLIM_IMAGE_TAG}" >> metadata/build-metadata.txt
                     echo "DOCKERHUB_REPO=${DOCKERHUB_REPO}" >> metadata/build-metadata.txt
                     echo "IMAGE_SIZE_BYTES=${IMAGE_SIZE_BYTES}" >> metadata/build-metadata.txt
                     echo "IMAGE_SIZE_MB=${IMAGE_SIZE_MB}" >> metadata/build-metadata.txt
@@ -83,7 +85,12 @@ pipeline {
                     echo "Image size: ${IMAGE_SIZE_MB} MB"
                     echo "Max allowed: ${MAX_IMAGE_SIZE_MB} MB"
 
+                    echo "IMAGE_SIZE_GATE=PASSED" > metadata/image-size-gate.txt
+                    echo "IMAGE_SIZE_MB=${IMAGE_SIZE_MB}" >> metadata/image-size-gate.txt
+                    echo "MAX_IMAGE_SIZE_MB=${MAX_IMAGE_SIZE_MB}" >> metadata/image-size-gate.txt
+
                     if [ "$IMAGE_SIZE_MB" -gt "$MAX_IMAGE_SIZE_MB" ]; then
+                      echo "IMAGE_SIZE_GATE=FAILED" > metadata/image-size-gate.txt
                       echo "Image is too large"
                       exit 1
                     fi
@@ -91,23 +98,49 @@ pipeline {
             }
         }
 
-        stage('Optional Slim build') {
+        stage('SlimToolkit build') {
             steps {
                 sh '''
                     mkdir -p metadata
 
-                    if command -v slim >/dev/null 2>&1; then
-                        echo "SlimToolkit found. Running slim build..." > metadata/docker-images-after-slim.txt
+                    echo "Before Slim:" > metadata/docker-images-after-slim.txt
+                    docker images | grep ${IMAGE_NAME} >> metadata/docker-images-after-slim.txt || true
 
-                        slim build \
-                          --target ${IMAGE_NAME}:${IMAGE_TAG} \
-                          --tag ${IMAGE_NAME}:${IMAGE_TAG}-slim || true
-
+                    if ! command -v slim >/dev/null 2>&1; then
                         echo "" >> metadata/docker-images-after-slim.txt
-                        docker images | grep ${IMAGE_NAME} >> metadata/docker-images-after-slim.txt || true
+                        echo "SlimToolkit not installed on Jenkins controller." >> metadata/docker-images-after-slim.txt
+                        echo "SLIM_STATUS=NOT_INSTALLED" > metadata/slim-metadata.txt
+                        exit 1
+                    fi
+
+                    echo "" >> metadata/docker-images-after-slim.txt
+                    echo "SlimToolkit found. Running slim build..." >> metadata/docker-images-after-slim.txt
+
+                    slim build \
+                      --http-probe=false \
+                      --target ${IMAGE_NAME}:${IMAGE_TAG} \
+                      --tag ${IMAGE_NAME}:${SLIM_IMAGE_TAG}
+
+                    echo "" >> metadata/docker-images-after-slim.txt
+                    echo "After Slim:" >> metadata/docker-images-after-slim.txt
+                    docker images | grep ${IMAGE_NAME} >> metadata/docker-images-after-slim.txt || true
+
+                    if docker image inspect ${IMAGE_NAME}:${SLIM_IMAGE_TAG} >/dev/null 2>&1; then
+                        ORIGINAL_SIZE_BYTES=$(docker image inspect ${IMAGE_NAME}:${IMAGE_TAG} --format='{{.Size}}')
+                        SLIM_SIZE_BYTES=$(docker image inspect ${IMAGE_NAME}:${SLIM_IMAGE_TAG} --format='{{.Size}}')
+                        ORIGINAL_SIZE_MB=$((ORIGINAL_SIZE_BYTES / 1024 / 1024))
+                        SLIM_SIZE_MB=$((SLIM_SIZE_BYTES / 1024 / 1024))
+
+                        echo "SLIM_STATUS=SUCCESS" > metadata/slim-metadata.txt
+                        echo "ORIGINAL_IMAGE=${IMAGE_NAME}:${IMAGE_TAG}" >> metadata/slim-metadata.txt
+                        echo "SLIM_IMAGE=${IMAGE_NAME}:${SLIM_IMAGE_TAG}" >> metadata/slim-metadata.txt
+                        echo "ORIGINAL_SIZE_BYTES=${ORIGINAL_SIZE_BYTES}" >> metadata/slim-metadata.txt
+                        echo "SLIM_SIZE_BYTES=${SLIM_SIZE_BYTES}" >> metadata/slim-metadata.txt
+                        echo "ORIGINAL_SIZE_MB=${ORIGINAL_SIZE_MB}" >> metadata/slim-metadata.txt
+                        echo "SLIM_SIZE_MB=${SLIM_SIZE_MB}" >> metadata/slim-metadata.txt
                     else
-                        echo "SlimToolkit not installed on Jenkins controller." > metadata/docker-images-after-slim.txt
-                        echo "Optional Slim build skipped." >> metadata/docker-images-after-slim.txt
+                        echo "SLIM_STATUS=FAILED" > metadata/slim-metadata.txt
+                        exit 1
                     fi
                 '''
             }
@@ -149,13 +182,14 @@ Approve deployment?
 Release details:
 - Build Number: ${BUILD_NUMBER}
 - Image: ${DOCKERHUB_REPO}:${IMAGE_TAG}
+- Slim Image: ${IMAGE_NAME}:${SLIM_IMAGE_TAG}
 - Image Size Gate: Passed
 - Trivy Filesystem Scan: Completed
 - Trivy Image Scan: Passed
-- Docker Slim Stage: Optional/Recorded
+- SlimToolkit Build: Completed
 - Metadata: Archived after build
 
-Approve only if the image scan and metadata are acceptable.
+Approve only if the image scan, slim result, and metadata are acceptable.
                             """,
                             ok: 'Approve deployment',
                             submitterParameter: 'APPROVER'
@@ -168,6 +202,7 @@ Approve only if the image scan and metadata are acceptable.
 
                     writeFile file: 'metadata/approval-metadata.txt', text: """APPROVED_BY=${approval}
 APPROVED_IMAGE=${DOCKERHUB_REPO}:${IMAGE_TAG}
+APPROVED_SLIM_IMAGE=${IMAGE_NAME}:${SLIM_IMAGE_TAG}
 APPROVED_BUILD=${BUILD_NUMBER}
 """
 
@@ -188,7 +223,10 @@ APPROVED_BUILD=${BUILD_NUMBER}
                     sh '''
                         echo "$DOCKERHUB_TOKEN" | docker login -u "$DOCKERHUB_USER" --password-stdin
 
+                        docker tag ${IMAGE_NAME}:${SLIM_IMAGE_TAG} ${DOCKERHUB_REPO}:${SLIM_IMAGE_TAG}
+
                         docker push ${DOCKERHUB_REPO}:${IMAGE_TAG}
+                        docker push ${DOCKERHUB_REPO}:${SLIM_IMAGE_TAG}
                         docker push ${DOCKERHUB_REPO}:latest
 
                         docker logout
