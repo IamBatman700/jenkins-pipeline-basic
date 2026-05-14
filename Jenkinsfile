@@ -95,8 +95,13 @@ pipeline {
         stage('Run Python tests') {
             steps {
                 sh '''
-                    python3 -m pip install requests
-                    python3 test_app.py
+                    python3 -m venv venv
+                    . venv/bin/activate
+
+                    pip install --upgrade pip
+                    pip install requests
+
+                    python test_app.py
                 '''
             }
         }
