@@ -104,7 +104,9 @@ pipeline {
                     mkdir -p metadata
 
                     echo "Before Slim:" > metadata/docker-images-after-slim.txt
-                    docker images | grep ${IMAGE_NAME} >> metadata/docker-images-after-slim.txt || true
+                    docker images --format "table {{.Repository}}\\t{{.Tag}}\\t{{.ID}}\\t{{.Size}}" \
+                      | grep -E "REPOSITORY|${IMAGE_NAME}[[:space:]]+${IMAGE_TAG}" \
+                      >> metadata/docker-images-after-slim.txt || true
 
                     if ! command -v slim >/dev/null 2>&1; then
                         echo "" >> metadata/docker-images-after-slim.txt
@@ -116,14 +118,16 @@ pipeline {
                     echo "" >> metadata/docker-images-after-slim.txt
                     echo "SlimToolkit found. Running slim build..." >> metadata/docker-images-after-slim.txt
 
-                    DOCKER_API_VERSION=1.40 slim build \
+                    slim build \
                       --http-probe=false \
                       --target ${IMAGE_NAME}:${IMAGE_TAG} \
                       --tag ${IMAGE_NAME}:${SLIM_IMAGE_TAG}
 
                     echo "" >> metadata/docker-images-after-slim.txt
                     echo "After Slim:" >> metadata/docker-images-after-slim.txt
-                    docker images | grep ${IMAGE_NAME} >> metadata/docker-images-after-slim.txt || true
+                    docker images --format "table {{.Repository}}\\t{{.Tag}}\\t{{.ID}}\\t{{.Size}}" \
+                      | grep -E "REPOSITORY|${IMAGE_NAME}[[:space:]]+(${IMAGE_TAG}|${SLIM_IMAGE_TAG})" \
+                      >> metadata/docker-images-after-slim.txt || true
 
                     if docker image inspect ${IMAGE_NAME}:${SLIM_IMAGE_TAG} >/dev/null 2>&1; then
                         ORIGINAL_SIZE_BYTES=$(docker image inspect ${IMAGE_NAME}:${IMAGE_TAG} --format='{{.Size}}')
