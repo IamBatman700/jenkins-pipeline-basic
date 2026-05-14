@@ -92,7 +92,16 @@ pipeline {
             }
         }
 
-        stage('Test') {
+        stage('Run Python tests') {
+            steps {
+                sh '''
+                    python3 -m pip install requests
+                    python3 test_app.py
+                '''
+            }
+        }
+
+        stage('Test with curl') {
             steps {
                 sh '''
                     docker ps
