@@ -138,10 +138,38 @@ pipeline {
             }
         }
 
-        stage('Manual approval') {
+        stage('Manual release approval') {
             steps {
-                input message: 'Image scan, size gate, Slim stage, and metadata collection completed. Approve DockerHub push and deployment?',
-                      ok: 'Approve'
+                script {
+                    def approval = timeout(time: 10, unit: 'MINUTES') {
+                        input(
+                            message: """
+Approve deployment?
+
+Release details:
+- Build Number: ${BUILD_NUMBER}
+- Image: ${DOCKERHUB_REPO}:${IMAGE_TAG}
+- Image Size Gate: Passed
+- Trivy Filesystem Scan: Completed
+- Trivy Image Scan: Passed
+- Docker Slim Stage: Optional/Recorded
+- Metadata: Archived after build
+
+Approve only if the image scan and metadata are acceptable.
+                            """,
+                            ok: 'Approve deployment',
+                            submitterParameter: 'APPROVER'
+                        )
+                    }
+
+                    sh """
+                        mkdir -p metadata
+                        echo "APPROVED_BY=${approval}" > metadata/approval-metadata.txt
+                        echo "APPROVED_IMAGE=${DOCKERHUB_REPO}:${IMAGE_TAG}" >> metadata/approval-metadata.txt
+                        echo "APPROVED_BUILD=${BUILD_NUMBER}" >> metadata/approval-metadata.txt
+                        echo "APPROVAL_TIME_UTC=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> metadata/approval-metadata.txt
+                    """
+                }
             }
         }
 
