@@ -116,7 +116,7 @@ pipeline {
                     echo "" >> metadata/docker-images-after-slim.txt
                     echo "SlimToolkit found. Running slim build..." >> metadata/docker-images-after-slim.txt
 
-                    slim build \
+                    DOCKER_API_VERSION=1.40 slim build \
                       --http-probe=false \
                       --target ${IMAGE_NAME}:${IMAGE_TAG} \
                       --tag ${IMAGE_NAME}:${SLIM_IMAGE_TAG}
