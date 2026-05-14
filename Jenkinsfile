@@ -73,6 +73,13 @@ pipeline {
             }
         }
 
+        stage('Manual approval') {
+            steps {
+                input message: 'Image scan completed. Approve deployment?',
+                      ok: 'Deploy'
+            }
+        }
+
         stage('Run containers') {
             steps {
                 sh '''
