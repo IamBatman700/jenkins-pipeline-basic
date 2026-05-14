@@ -162,13 +162,18 @@ Approve only if the image scan and metadata are acceptable.
                         )
                     }
 
-                    sh """
+                    sh '''
                         mkdir -p metadata
-                        echo "APPROVED_BY=${approval}" > metadata/approval-metadata.txt
-                        echo "APPROVED_IMAGE=${DOCKERHUB_REPO}:${IMAGE_TAG}" >> metadata/approval-metadata.txt
-                        echo "APPROVED_BUILD=${BUILD_NUMBER}" >> metadata/approval-metadata.txt
+                    '''
+
+                    writeFile file: 'metadata/approval-metadata.txt', text: """APPROVED_BY=${approval}
+APPROVED_IMAGE=${DOCKERHUB_REPO}:${IMAGE_TAG}
+APPROVED_BUILD=${BUILD_NUMBER}
+"""
+
+                    sh '''
                         echo "APPROVAL_TIME_UTC=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> metadata/approval-metadata.txt
-                    """
+                    '''
                 }
             }
         }
