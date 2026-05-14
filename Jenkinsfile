@@ -4,7 +4,7 @@ pipeline {
     environment {
         IMAGE_NAME = 'flask-hostname-app'
         IMAGE_TAG = "${BUILD_NUMBER}"
-        DOCKERHUB_REPO = 'iambatman700/flask-hostname-app'
+        DOCKERHUB_REPO = 'mathieu700/flask-hostname-app'
         YOUR_NAME = 'Matt'
         MAX_IMAGE_SIZE_MB = '250'
     }
