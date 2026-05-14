@@ -4,7 +4,9 @@ pipeline {
     environment {
         IMAGE_NAME = 'flask-hostname-app'
         IMAGE_TAG = "${BUILD_NUMBER}"
+        DOCKERHUB_REPO = 'iambatman700/flask-hostname-app'
         YOUR_NAME = 'Matt'
+        MAX_IMAGE_SIZE_MB = '250'
     }
 
     stages {
@@ -28,7 +30,7 @@ pipeline {
         stage('Filesystem security scan') {
             steps {
                 sh '''
-                    mkdir -p reports
+                    mkdir -p reports metadata
 
                     trivy fs \
                       --scanners vuln,secret,misconfig \
@@ -44,6 +46,47 @@ pipeline {
                 sh '''
                     docker build -t ${IMAGE_NAME}:${IMAGE_TAG} .
                     docker tag ${IMAGE_NAME}:${IMAGE_TAG} ${IMAGE_NAME}:latest
+                    docker tag ${IMAGE_NAME}:${IMAGE_TAG} ${DOCKERHUB_REPO}:${IMAGE_TAG}
+                    docker tag ${IMAGE_NAME}:${IMAGE_TAG} ${DOCKERHUB_REPO}:latest
+                '''
+            }
+        }
+
+        stage('Collect metadata') {
+            steps {
+                sh '''
+                    mkdir -p metadata
+
+                    docker image inspect ${IMAGE_NAME}:${IMAGE_TAG} > metadata/image-inspect.json
+
+                    IMAGE_SIZE_BYTES=$(docker image inspect ${IMAGE_NAME}:${IMAGE_TAG} --format='{{.Size}}')
+                    IMAGE_SIZE_MB=$((IMAGE_SIZE_BYTES / 1024 / 1024))
+
+                    echo "IMAGE_NAME=${IMAGE_NAME}" > metadata/build-metadata.txt
+                    echo "IMAGE_TAG=${IMAGE_TAG}" >> metadata/build-metadata.txt
+                    echo "DOCKERHUB_REPO=${DOCKERHUB_REPO}" >> metadata/build-metadata.txt
+                    echo "IMAGE_SIZE_BYTES=${IMAGE_SIZE_BYTES}" >> metadata/build-metadata.txt
+                    echo "IMAGE_SIZE_MB=${IMAGE_SIZE_MB}" >> metadata/build-metadata.txt
+                    echo "GIT_COMMIT=$(git rev-parse HEAD || true)" >> metadata/build-metadata.txt
+                    echo "BUILD_NUMBER=${BUILD_NUMBER}" >> metadata/build-metadata.txt
+                    echo "BUILD_URL=${BUILD_URL}" >> metadata/build-metadata.txt
+                '''
+            }
+        }
+
+        stage('Gate image size') {
+            steps {
+                sh '''
+                    IMAGE_SIZE_BYTES=$(docker image inspect ${IMAGE_NAME}:${IMAGE_TAG} --format='{{.Size}}')
+                    IMAGE_SIZE_MB=$((IMAGE_SIZE_BYTES / 1024 / 1024))
+
+                    echo "Image size: ${IMAGE_SIZE_MB} MB"
+                    echo "Max allowed: ${MAX_IMAGE_SIZE_MB} MB"
+
+                    if [ "$IMAGE_SIZE_MB" -gt "$MAX_IMAGE_SIZE_MB" ]; then
+                      echo "Image is too large"
+                      exit 1
+                    fi
                 '''
             }
         }
@@ -75,8 +118,27 @@ pipeline {
 
         stage('Manual approval') {
             steps {
-                input message: 'Image scan completed. Approve deployment?',
-                      ok: 'Deploy'
+                input message: 'Image scan, size gate, and metadata collection completed. Approve DockerHub push and deployment?',
+                      ok: 'Approve'
+            }
+        }
+
+        stage('Push to DockerHub') {
+            steps {
+                withCredentials([usernamePassword(
+                    credentialsId: 'dockerhub-creds',
+                    usernameVariable: 'DOCKERHUB_USER',
+                    passwordVariable: 'DOCKERHUB_TOKEN'
+                )]) {
+                    sh '''
+                        echo "$DOCKERHUB_TOKEN" | docker login -u "$DOCKERHUB_USER" --password-stdin
+
+                        docker push ${DOCKERHUB_REPO}:${IMAGE_TAG}
+                        docker push ${DOCKERHUB_REPO}:latest
+
+                        docker logout
+                    '''
+                }
             }
         }
 
@@ -125,7 +187,7 @@ pipeline {
 
     post {
         always {
-            archiveArtifacts artifacts: 'reports/*.txt', allowEmptyArchive: true
+            archiveArtifacts artifacts: 'reports/*.txt, metadata/*', allowEmptyArchive: true
         }
     }
 }
