@@ -91,6 +91,28 @@ pipeline {
             }
         }
 
+        stage('Optional Slim build') {
+            steps {
+                sh '''
+                    mkdir -p metadata
+
+                    if command -v slim >/dev/null 2>&1; then
+                        echo "SlimToolkit found. Running slim build..." > metadata/docker-images-after-slim.txt
+
+                        slim build \
+                          --target ${IMAGE_NAME}:${IMAGE_TAG} \
+                          --tag ${IMAGE_NAME}:${IMAGE_TAG}-slim || true
+
+                        echo "" >> metadata/docker-images-after-slim.txt
+                        docker images | grep ${IMAGE_NAME} >> metadata/docker-images-after-slim.txt || true
+                    else
+                        echo "SlimToolkit not installed on Jenkins controller." > metadata/docker-images-after-slim.txt
+                        echo "Optional Slim build skipped." >> metadata/docker-images-after-slim.txt
+                    fi
+                '''
+            }
+        }
+
         stage('Image security scan') {
             steps {
                 sh '''
@@ -118,7 +140,7 @@ pipeline {
 
         stage('Manual approval') {
             steps {
-                input message: 'Image scan, size gate, and metadata collection completed. Approve DockerHub push and deployment?',
+                input message: 'Image scan, size gate, Slim stage, and metadata collection completed. Approve DockerHub push and deployment?',
                       ok: 'Approve'
             }
         }
